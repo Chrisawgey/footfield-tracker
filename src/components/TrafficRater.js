@@ -1,8 +1,9 @@
 // src/components/TrafficRater.js
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { db } from "../lib/firebase";
-import { doc, setDoc, serverTimestamp, collection, addDoc } from "firebase/firestore";
+import { doc, setDoc, serverTimestamp, collection, addDoc, getDocs, query, where, orderBy, limit } from "firebase/firestore";
 import { useRouter } from "next/router";
+import FieldHeatmap from "./FieldHeatmap"; // We'll create this next
 
 export default function TrafficRater({ field, user }) {
   const [trafficLevel, setTrafficLevel] = useState("medium");
@@ -10,7 +11,76 @@ export default function TrafficRater({ field, user }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
+  const [aggregatedTraffic, setAggregatedTraffic] = useState(null);
   const router = useRouter();
+
+  // Fetch existing traffic reports when component mounts
+  useEffect(() => {
+    if (field?.id) {
+      fetchTrafficReports();
+    }
+  }, [field]);
+
+  const fetchTrafficReports = async () => {
+    try {
+      const trafficRef = collection(db, "traffic-reports");
+      const q = query(
+        trafficRef,
+        where("fieldId", "==", field.id),
+        orderBy("timestamp", "desc"),
+        limit(20) // Get the most recent 20 reports
+      );
+      
+      const snapshot = await getDocs(q);
+      
+      if (!snapshot.empty) {
+        const reports = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        
+        // Calculate majority traffic level
+        const aggregated = determineTrafficLevel(reports);
+        setAggregatedTraffic(aggregated);
+        
+        // Initialize form with the majority level as default
+        setTrafficLevel(aggregated.level);
+      }
+    } catch (error) {
+      console.error("Error fetching traffic reports:", error);
+    }
+  };
+
+  // Algorithm to determine the majority traffic level
+  const determineTrafficLevel = (reports) => {
+    // Count occurrences of each level
+    const counts = reports.reduce((acc, report) => {
+      acc[report.trafficLevel] = (acc[report.trafficLevel] || 0) + 1;
+      return acc;
+    }, {});
+    
+    // Find the level with the most reports
+    let highestCount = 0;
+    let majorityLevel = "medium"; // Default if no reports
+    
+    for (const [level, count] of Object.entries(counts)) {
+      if (count > highestCount) {
+        highestCount = count;
+        majorityLevel = level;
+      }
+    }
+    
+    // Calculate confidence (percentage of reports agreeing)
+    const totalReports = reports.length;
+    const confidence = totalReports > 0 ? (highestCount / totalReports) * 100 : 0;
+    
+    return {
+      level: majorityLevel,
+      confidence: Math.round(confidence),
+      reportCount: totalReports,
+      lastUpdated: reports.length > 0 ? reports[0].timestamp : null
+    };
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -42,6 +112,9 @@ export default function TrafficRater({ field, user }) {
         timestamp: serverTimestamp()
       });
       
+      // Refresh the traffic reports
+      await fetchTrafficReports();
+      
       setSuccess(true);
       setComment("");
     } catch (error) {
@@ -56,6 +129,26 @@ export default function TrafficRater({ field, user }) {
     <div className="bg-white rounded-lg shadow p-4">
       <h3 className="font-medium mb-2">{field.name}</h3>
       <p className="text-sm text-gray-500 mb-4">{field.address}</p>
+      
+      {/* Visual representation of the field */}
+      <div className="mb-4">
+        <FieldHeatmap 
+          trafficLevel={aggregatedTraffic?.level || trafficLevel} 
+          fieldName={field.name}
+        />
+      </div>
+      
+      {aggregatedTraffic && (
+        <div className="mb-4 p-3 bg-gray-100 rounded">
+          <p><strong>Current Traffic:</strong> {capitalizeFirst(aggregatedTraffic.level)}</p>
+          <p><strong>Confidence:</strong> {aggregatedTraffic.confidence}% ({aggregatedTraffic.reportCount} reports)</p>
+          {aggregatedTraffic.lastUpdated && (
+            <p className="text-xs text-gray-500 mt-1">
+              Last updated: {new Date(aggregatedTraffic.lastUpdated?.seconds * 1000).toLocaleString()}
+            </p>
+          )}
+        </div>
+      )}
       
       {error && <div className="bg-red-100 text-red-700 p-2 rounded mb-4">{error}</div>}
       {success && <div className="bg-green-100 text-green-700 p-2 rounded mb-4">Traffic report submitted successfully!</div>}
@@ -148,4 +241,9 @@ function TrafficButton({ level, selected, onClick }) {
       {getLabel()}
     </button>
   );
+}
+
+function capitalizeFirst(string) {
+  if (!string) return '';
+  return string.charAt(0).toUpperCase() + string.slice(1);
 }
