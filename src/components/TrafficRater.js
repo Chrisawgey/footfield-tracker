@@ -1,11 +1,11 @@
-// src/components/TrafficRater.js
+// src/components/TrafficRater.js - Without comments section (continued)
 import { useState, useEffect } from "react";
 import { db } from "../lib/firebase";
 import { doc, setDoc, serverTimestamp, collection, addDoc, getDocs, query, where, orderBy, limit } from "firebase/firestore";
 import { useRouter } from "next/router";
-import FieldHeatmap from "./FieldHeatmap"; // We'll create this next
+import FieldHeatmap from "./FieldHeatmap";
 
-export default function TrafficRater({ field, user }) {
+export default function TrafficRater({ field, user, onSubmitSuccess }) {
   const [trafficLevel, setTrafficLevel] = useState("medium");
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -82,6 +82,36 @@ export default function TrafficRater({ field, user }) {
     };
   };
 
+  // Determine category based on comment content
+  const determineCommentCategory = (comment) => {
+    if (!comment || comment.trim() === "") return "general";
+    
+    const lowerComment = comment.toLowerCase();
+    
+    if (lowerComment.includes("mud") || lowerComment.includes("grass") || 
+        lowerComment.includes("turf") || lowerComment.includes("condition")) {
+      return "conditions";
+    } 
+    else if (lowerComment.includes("game") || lowerComment.includes("player") || 
+             lowerComment.includes("team") || lowerComment.includes("match")) {
+      return "players";
+    }
+    else if (lowerComment.includes("bathroom") || lowerComment.includes("toilet") || 
+             lowerComment.includes("water") || lowerComment.includes("bench")) {
+      return "facilities";
+    }
+    else if (lowerComment.includes("park") || lowerComment.includes("car") || 
+             lowerComment.includes("lot")) {
+      return "parking";
+    }
+    else if (lowerComment.includes("safe") || lowerComment.includes("light") || 
+             lowerComment.includes("danger") || lowerComment.includes("secure")) {
+      return "safety";
+    }
+    
+    return "general";
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -101,22 +131,52 @@ export default function TrafficRater({ field, user }) {
         lastUpdated: serverTimestamp()
       }, { merge: true });
       
+      // Create a timestamp that we'll use for both records
+      const currentTimestamp = serverTimestamp();
+      
       // Then, add a traffic report to the history
-      await addDoc(collection(db, "traffic-reports"), {
+      const trafficReportData = {
         fieldId: field.id,
         fieldName: field.name,
         trafficLevel: trafficLevel,
         comment: comment,
         userId: user.uid,
         userEmail: user.email,
-        timestamp: serverTimestamp()
-      });
+        timestamp: currentTimestamp
+      };
+      
+      await addDoc(collection(db, "traffic-reports"), trafficReportData);
+      
+      // If there's a comment, also add it to the field-comments collection
+      if (comment && comment.trim() !== "") {
+        const category = determineCommentCategory(comment);
+        
+        await addDoc(collection(db, "field-comments"), {
+          fieldId: field.id,
+          fieldName: field.name,
+          comment: comment.trim(),
+          category: category,
+          userId: user.uid,
+          userEmail: user.email,
+          userName: user.displayName || user.email.split('@')[0],
+          timestamp: currentTimestamp,
+          fromTrafficReport: true,
+          trafficLevel: trafficLevel
+        });
+      }
       
       // Refresh the traffic reports
       await fetchTrafficReports();
       
       setSuccess(true);
       setComment("");
+      
+      // Call onSubmitSuccess callback if provided (for mobile UI)
+      if (onSubmitSuccess && typeof onSubmitSuccess === 'function') {
+        setTimeout(() => {
+          onSubmitSuccess();
+        }, 1500); // Wait a moment so user can see success message
+      }
     } catch (error) {
       console.error("Error submitting traffic report: ", error);
       setError("Failed to submit report. Please try again.");
@@ -183,6 +243,9 @@ export default function TrafficRater({ field, user }) {
             className="w-full border rounded p-2 text-sm"
             placeholder="Add details about the field conditions..."
           />
+          <p className="text-xs text-gray-500 mt-1">
+            Your comment will be visible to other users
+          </p>
         </div>
         
         {user ? (
