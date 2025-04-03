@@ -1,8 +1,9 @@
-// src/pages/index.js
+// src/pages/index.js with integrated FieldMap
 import { useState, useEffect, useRef } from "react";
 import Navigation from "../components/Navigation";
 import NearbyFields from "../components/NearbyFields";
 import TrafficRater from "../components/TrafficRater";
+import FieldMap from "../components/FieldMap"; // Import the new FieldMap component
 import { db } from "../lib/firebase";
 import { collection, query, getDocs } from "firebase/firestore";
 import { getDistance } from "geolib";
@@ -24,6 +25,7 @@ export default function Home({ user }) {
   const [debugInfo, setDebugInfo] = useState(null);
   const [isMobile, setIsMobile] = useState(false);
   const [showMobileRater, setShowMobileRater] = useState(false);
+  const [useLiteMode, setUseLiteMode] = useState(false); // New state for lite mode
   
   // Reference for the rater component to scroll to
   const raterRef = useRef(null);
@@ -286,6 +288,41 @@ export default function Home({ user }) {
           <div>
             {nearbyFields.length > 0 ? (
               <div>
+                {/* NEW: Field Map Section */}
+                <div className="mb-8">
+                  <div className="flex justify-between items-center mb-4">
+                    <h2 className="text-2xl font-bold text-gray-800">Field Map</h2>
+                    <div className="flex items-center">
+                      <label className="inline-flex items-center mr-4 text-sm text-gray-600">
+                        <input 
+                          type="checkbox" 
+                          checked={useLiteMode}
+                          onChange={(e) => setUseLiteMode(e.target.checked)}
+                          className="mr-2"
+                        />
+                        Lite Mode (Save Data)
+                      </label>
+                      <button 
+                        onClick={resetLocation} 
+                        className="flex items-center text-sm text-gray-600 hover:text-green-600 transition-colors"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        Update Location
+                      </button>
+                    </div>
+                  </div>
+                  
+                  {/* Only show map if not in lite mode */}
+                  {!useLiteMode && (
+                    <FieldMap 
+                      userLocation={userLocation}
+                      nearbyFields={nearbyFields}
+                    />
+                  )}
+                </div>
+                
                 <div className="flex justify-between items-center mb-6">
                   <h2 className="text-2xl font-bold text-gray-800">Nearby Soccer Fields</h2>
                   <button 
